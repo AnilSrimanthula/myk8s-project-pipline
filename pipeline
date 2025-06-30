@@ -1,0 +1,70 @@
+pipeline {
+    agent any
+    tools{
+        nodejs 'node16'
+        jdk 'jdk17'
+    }
+    environment{
+        SCANNER_HOME=tool 'mysonar'
+    }
+    
+    stages {
+        stage('cleanws') {
+            steps {
+                cleanWs()
+                
+            }
+        }
+        stage("code"){
+            steps{
+                git 'https://github.com/AnilSrimanthula/k8s-project.git'
+            }
+        }
+        stage('sonarcqa'){
+            steps{
+                 withSonarQubeEnv('mysonar') {
+                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=zomato \
+                    -Dsonar.projectKey=zomato '''
+                 }
+            }
+        }
+        stage('qalitygates'){
+            steps{
+                script{
+                    waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token'
+                      
+                }
+            }
+        }
+        stage('build'){
+            steps{
+                sh "npm install"
+            }
+        }
+        stage('owasp'){
+            steps{
+                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'Dp-Check'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+        stage('image build'){
+            steps{
+                sh 'docker build -t anilsrimanthula/mytreegame:v1 .'
+            }
+        }
+        stage("scan"){
+            steps{
+                sh 'trivy fs . > trivyfs.txt'
+                sh 'trivy image anilsrimanthula/mytreegame:v1'
+                
+            }
+        }
+        stage('pushtpdockuhub'){
+            steps{
+                withDockerRegistry(credentialsId: 'dockerhub', url: 'https://index.docker.io/v1/') {
+                sh 'docker push anilsrimanthula/mytreegame:v1'
+                }
+            }
+        }
+    }
+}
